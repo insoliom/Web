@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <title>Casdoor Login (Token in Cookie)</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px }
+        #status { margin: 10px 0; font-weight: bold }
+        button[disabled] { opacity: 0.4; cursor: not-allowed }
+        pre { background:#f6f6f6; padding:8px }
+        #updates {
+            list-style:none;
+            padding:0;
+            margin:20px 0;
+            max-width: 400px;
+        }
+        #updates li {
+            padding: 8px;
+            /* border-bottom: 1px solid #ddd; */ /* лінія прибрана */
+            transition: color 0.5s ease;
+            color: black; /* базовий колір */
+            font-weight: bold;
+            display: none; /* приховуємо поки немає оновлень */
+        }
+        #subscribeBtn { margin-top: 10px; }
+    </style>
+    <!-- Підключаємо protobuf.js -->
+    <script src="https://cdn.jsdelivr.net/npm/protobufjs/dist/protobuf.min.js"></script>
+</head>
+<body>
+<h1>Casdoor Login (Token in Cookie)</h1>
+<div id="status">Loading…</div>
+<button id="loginBtn" onclick="login()">Login with Casdoor</button>
+<button id="getInfoBtn" onclick="getUserInfo()">Get User Info</button>
+
+<pre id="userinfo"></pre>
+
+<h2>Cryptocurrency Updates</h2>
+<ul id="updates">
+    <li id="coin-BTC" data-coin="BTC">BTC: <span class="price"></span></li>
+    <li id="coin-ETH" data-coin="ETH">ETH: <span class="price"></span></li>
+    <li id="coin-XRP" data-coin="XRP">XRP: <span class="price"></span></li>
+    <li id="coin-DOGE" data-coin="DOGE">DOGE: <span class="price"></span></li>
+</ul>
+<button id="subscribeBtn" onclick="subscribe()" disabled>
+    Subscribe to Updates
+</button>
+
+<script>
+    let websocketEndpoint;
+    let TickerUpdateProto = null;
+    let CoinEnum = null;
+    let socket;
+
+    // Зберігаємо останні ціни для порівняння
+    const lastPrices = {};
+
+    async function initConfig() {
+        const res = await fetch('/config');
+        if (!res.ok) throw new Error('Failed to load config');
+        const cfg = await res.json();
+        websocketEndpoint = cfg.websocketEndpoint;
+    }
+
+    protobuf.load("/TickerUpdate.proto", function(err, root) {
+        if (err) {
+            alert("Proto load error: " + err);
+            return;
+        }
+        TickerUpdateProto = root.lookupType("com.example.protobuf.TickerUpdate");
+        CoinEnum = root.lookupEnum("com.example.protobuf.Coin");
+    });
+
+    function getCookie(name) {
+        return document.cookie.split('; ')
+            .find(r => r.startsWith(name + '='))?.split('=')[1];
+    }
+
+    function login() {
+        window.location.href = '/login';
+    }
+
+    async function getUserInfo() {
+        const token = getCookie('access_token');
+        if (!token) {
+            document.getElementById('userinfo').innerText = 'No access_token';
+            return;
+        }
+        const res = await fetch('/userinfo', {
+            headers: { Authorization: 'Bearer ' + token }
+        });
+        document.getElementById('userinfo').innerText = res.ok
+            ? JSON.stringify(await res.json(), null, 2)
+            : `Error ${res.status}`;
+    }
+
+    function subscribe() {
+        const token = getCookie('access_token');
+        if (!token) { alert('Login first'); return; }
+        const wsUrl = `${websocketEndpoint}?token=${token}`;
+        socket = new WebSocket(wsUrl);
+        socket.binaryType = 'arraybuffer';
+
+        socket.onopen = () => {
+            console.log('WS connected');
+            document.getElementById('subscribeBtn').disabled = true;
+            document.querySelectorAll('#updates li').forEach(li => {
+                li.style.display = 'block';
+            });
+        };
+        socket.onmessage = e => {
+            if (!TickerUpdateProto) return;
+            const bytes = new Uint8Array(e.data);
+            const msg = TickerUpdateProto.decode(bytes);
+            const coin = CoinEnum ? CoinEnum.valuesById[msg.coin] : msg.coin;
+            updatePrice(coin, msg.price, msg.timestamp);
+        };
+        socket.onclose = () => {
+            console.log('WS closed');
+            document.getElementById('subscribeBtn').disabled = false;
+        };
+    }
+
+    function updatePrice(coin, price, timestamp) {
+        const li = document.querySelector(`#coin-${coin}`);
+        if (!li) return;
+
+        const priceSpan = li.querySelector('.price');
+        const oldPrice = lastPrices[coin];
+        priceSpan.textContent = `$${price.toFixed(2)} @ ${new Date(timestamp).toLocaleTimeString()}`;
+
+        if (oldPrice === undefined || oldPrice === price) {
+            li.style.color = 'black';
+        } else if (price > oldPrice) {
+            li.style.color = 'green';
+        } else {
+            li.style.color = 'red';
+        }
+
+        lastPrices[coin] = price;
+    }
+
+    window.addEventListener('DOMContentLoaded', async () => {
+        try {
+            await initConfig();
+        } catch (err) {
+            document.getElementById('status').innerText = 'Cannot load config';
+            return;
+        }
+        const token   = getCookie('access_token');
+        const status  = document.getElementById('status');
+        const loginBtn= document.getElementById('loginBtn');
+        const subBtn  = document.getElementById('subscribeBtn');
+        if (token) {
+            status.innerText   = 'Already logged in!';
+            loginBtn.disabled  = true;
+            subBtn.disabled    = false;
+        } else {
+            status.innerText   = 'Not logged in';
+            loginBtn.disabled  = false;
+            subBtn.disabled    = true;
+        }
+    });
+</script>
+</body>
+</html>

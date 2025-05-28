@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+package com.example.protobuf;
+
+enum Coin {
+  BTC = 0;
+  ETH = 1;
+  XRP = 2;
+  DOGE = 3;
+}
+
+message TickerUpdate {
+  Coin coin = 1;
+  double price = 2;
+  int64 timestamp = 3;
+}

@@ -1,0 +1,35 @@
+services:
+  mysql:
+    image: mysql:8
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: 123456
+      MYSQL_DATABASE: casdoor
+    ports:
+      - "3306:3306"
+    volumes:
+      - demo3_mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  casdoor:
+    image: casbin/casdoor
+    container_name: casdoor
+    ports:
+      - "8000:8000"
+      - "10443:10443"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    volumes:
+        - ./casdoor_conf/app-config/app.conf:/conf/app.conf
+        - ./casdoor_conf/cert:/certs
+    environment:
+      - RUNNING_IN_DOCKER=true
+
+volumes:
+  demo3_mysql_data:
+
